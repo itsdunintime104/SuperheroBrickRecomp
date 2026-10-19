@@ -1,0 +1,28 @@
+# Game profile: the values the tools cannot read from the game binary.
+# Paths are relative to this file's folder. Everything else (entry point, segments,
+# static area, front-end function and data addresses) is derived by tools/game/derive.py.
+id = "marvel"
+title = "LEGO Marvel Super Heroes"
+window_title = "LEGO Marvel Super Heroes"
+steam_app_id = 249130
+steam_build = "329428"
+steam_app = "LEGO Marvel Super Heroes/LEGO Marvel Super Heroes.app"
+game_exe = "LEGOMarvel.macbin"
+binary_sha256 = "258e5a18769722375b27a1663cc57fbf66b38683c68af5c59782b682a52e18b8"
+binary = "orig.nosync/marvel_i386"
+analysis = "recon/analysis.json"
+switch_tables = "recon/switch_tables.json"
+import_sigs = "recon/import_sigs.json"
+env_prefix = "MARVEL"
+# Entries this game's binary does not have: names from feral_frontend.toml, and "NuMain"
+# (no Feral plug-in launcher, so no NuMain CFString).
+absent = ["fe_backing_size", "G_INIT_ONCE", "G_DISPLAY_MODE", "G_RETINA", "NuMain"]
+
+[app]
+name = "Superheros Bricks Recompiled"
+exe = "SuperherosBricksRecompiled"
+bundle_id = "local.marvelrecomp"
+support_dir = "MarvelRecomp"
+old_name = "Marvel Recompiled.app"
+
+[pins]

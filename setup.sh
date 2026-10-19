@@ -1,0 +1,253 @@
+#!/bin/sh
+# One-command setup: checks the machine, translates your own copy of the game,
+# builds the native program and installs the app.
+# Usage: ./setup.sh [--check] [--force] [--no-install] [--help]
+set -eu
+
+ROOT=$(cd "$(dirname "$0")" && pwd)
+cd "$ROOT"
+
+# The engine is the engine/ submodule.
+ENGINE="$ROOT/engine"
+GAME_TOML="$ROOT/game.toml"
+if [ ! -f "$ENGINE/build/Makefile" ]; then
+    echo "setup: engine/ is empty. Run: git submodule update --init" >&2
+    exit 1
+fi
+
+CHECK_ONLY=0
+FORCE=0
+INSTALL=1
+
+usage() {
+    cat <<USAGE
+Usage: ./setup.sh [options]
+
+Builds the app from your own Steam copy of the game in game.toml.
+
+Options:
+  --check       Check the requirements only, then stop.
+  --force       Translate again even if generated.nosync exists.
+  --no-install  Build the app but do not copy it to ~/Applications.
+  --help        Show this text.
+
+Set <PREFIX>_APP (the env_prefix in game.toml) to the game's .app bundle if it is not in the default Steam folder.
+USAGE
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --check) CHECK_ONLY=1 ;;
+        --force) FORCE=1 ;;
+        --no-install) INSTALL=0 ;;
+        --help|-h) usage; exit 0 ;;
+        *) echo "setup: unknown option: $arg" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+step() { echo "==> $*"; }
+fail() { echo "setup: $*" >&2; exit 1; }
+
+MISSING=0
+ok() { printf 'OK       %s\n' "$1"; }
+missing() { printf 'MISSING  %s\n         fix: %s\n' "$1" "$2"; MISSING=$((MISSING + 1)); }
+
+# Print the first python3 on PATH that is 3.11 or newer (the default python3 may be older).
+find_python() {
+    for cand in python3 python3.14 python3.13 python3.12 python3.11; do
+        if command -v "$cand" >/dev/null 2>&1 \
+            && "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+            command -v "$cand"
+            return
+        fi
+    done
+}
+
+# Run one build tool with a harmless command and report it.
+# Usage: check_tool NAME FIX COMMAND...
+# A tool that is found but fails is often another copy earlier in PATH
+# (for example MacPorts); Apple's copy is in /usr/bin.
+check_tool() {
+    name=$1; fix=$2; shift 2
+    path=$(command -v "$1" 2>/dev/null) || { missing "$name: not found" "$fix"; return; }
+    if err=$("$@" 2>&1 >/dev/null); then
+        ok "$name ($path)"
+        return
+    fi
+    case "$path" in
+        /usr/bin/*) ;;
+        *) fix="$path is not Apple's copy. Put Apple's tools first: PATH=/usr/bin:\$PATH ./setup.sh" ;;
+    esac
+    missing "$name: $path fails: $(printf '%s\n' "$err" | head -n 1 | cut -c 1-120)" "$fix"
+}
+
+check_build_tools() {
+    T=$(mktemp -d "${TMPDIR:-/tmp}/recomp-setup.XXXXXX")
+    trap 'rm -rf "$T"' EXIT INT TERM
+    printf 'int main(void) { return 0; }\n' > "$T/t.c"
+    check_tool "C compiler (clang, arm64 and x86_64)" "xcode-select --install" \
+        clang -arch arm64 -arch x86_64 "$T/t.c" -o "$T/t"
+    check_tool "make" "xcode-select --install" make --version
+    check_tool "otool" "xcode-select --install" otool -h /usr/bin/true
+    if [ -f "$T/t" ]; then
+        check_tool "install_name_tool" "xcode-select --install" install_name_tool -add_rpath @loader_path "$T/t"
+    else
+        printf 'SKIPPED  install_name_tool (needs the C compiler)\n'
+    fi
+    rm -rf "$T"
+    trap - EXIT INT TERM
+}
+
+preflight() {
+    step "1/7 Checking requirements"
+
+    if [ "$(uname -s)" = Darwin ]; then ok "macOS"; else missing "macOS (this is $(uname -s))" "run this on a Mac"; fi
+
+    if [ "$(uname -m)" = arm64 ]; then ok "Apple Silicon (arm64)"; else missing "Apple Silicon (this is $(uname -m))" "use a Mac with an M-series chip"; fi
+
+    if xcode-select -p >/dev/null 2>&1; then
+        ok "Xcode Command Line Tools"
+        check_build_tools
+    else
+        missing "Xcode Command Line Tools (C compiler, make, otool)" "xcode-select --install"
+    fi
+
+    # "brew --prefix sdl2" can print an alias path without lib/, so build the path from the Homebrew prefix.
+    SDL_LIB=""
+    if command -v brew >/dev/null 2>&1; then
+        SDL_LIB="$(brew --prefix)/opt/sdl2/lib/libSDL2-2.0.0.dylib"
+    fi
+    if [ -n "$SDL_LIB" ] && [ -f "$SDL_LIB" ]; then
+        ok "Homebrew SDL2"
+    elif command -v brew >/dev/null 2>&1; then
+        missing "Homebrew SDL2" "brew install sdl2"
+    else
+        missing "Homebrew (needed for SDL2)" "install Homebrew from https://brew.sh, then: brew install sdl2"
+    fi
+
+    PYTHON=$(find_python)
+    if [ -n "$PYTHON" ]; then
+        ok "Python 3.11 or newer ($PYTHON)"
+    else
+        missing "Python 3.11 or newer" "brew install python"
+    fi
+
+    if /usr/bin/pgrep oahd >/dev/null 2>&1 || arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+        ok "Rosetta 2"
+    else
+        missing "Rosetta 2" "softwareupdate --install-rosetta --agree-to-license"
+    fi
+
+    FREE_KB=$(df -k "$ROOT" | awk 'NR==2 {print $4}')
+    if [ "${FREE_KB:-0}" -ge 2097152 ]; then
+        ok "Free disk space (at least 2 GB)"
+    else
+        missing "Free disk space (at least 2 GB)" "free up disk space"
+    fi
+
+    if [ "$MISSING" -gt 0 ]; then
+        echo "setup: $MISSING requirement(s) missing. Run the fix commands above, then run ./setup.sh again." >&2
+        exit 1
+    fi
+}
+
+locate_and_copy_game() {
+    step "2/7 Locating the game"
+    [ -f "$GAME_BIN" ] || fail "game binary not found: $GAME_BIN
+Install $GAME_TITLE from Steam, or set ${ENV_PREFIX}_APP to its .app bundle."
+    echo "found $GAME_BIN"
+
+    step "3/7 Copying and verifying the game binary"
+    mkdir -p "$(dirname "$ORIG")"
+    if [ -f "$ORIG" ] && cmp -s "$GAME_BIN" "$ORIG"; then
+        echo "$ORIG is up to date"
+    else
+        cp "$GAME_BIN" "$ORIG"
+        echo "copied to $ORIG"
+    fi
+    SHA=$(shasum -a 256 "$ORIG" | awk '{print $1}')
+    if [ "$SHA" = "$BINARY_SHA256" ]; then
+        echo "sha256 matches (build $STEAM_BUILD)"
+    else
+        fail "the game binary does not match (sha256 $SHA).
+Only Steam build $STEAM_BUILD of $GAME_TITLE (Mac) is supported. In Steam, check that the game is up to date and not on a beta branch."
+    fi
+}
+
+setup_venv() {
+    step "4/7 Python environment"
+    if [ -x "$GAME_ROOT/.venv/bin/python" ] && "$GAME_ROOT/.venv/bin/python" -c 'import capstone, unicorn, pytest' >/dev/null 2>&1; then
+        echo ".venv is ready"
+    else
+        "$PYTHON" -m venv "$GAME_ROOT/.venv"
+        "$GAME_ROOT/.venv/bin/python" -m pip install --quiet capstone unicorn pytest
+        echo ".venv created"
+    fi
+}
+
+translate() {
+    step "5/7 Translating the game code"
+    if [ -f "$GEN/lift_report.json" ] && [ "$FORCE" -eq 0 ]; then
+        echo "generated.nosync is complete; skipping (use --force to translate again)"
+        return
+    fi
+    NCPU=$(sysctl -n hw.ncpu)
+    make -C "$ENGINE/build" GAME="$GAME_TOML" game
+    (cd "$ENGINE" && "$GAME_ROOT/.venv/bin/python" -m tools.xrecomp.run \
+        --analysis "$ANALYSIS" --switch "$SWITCH_TABLES" \
+        --bin "$BINARY" --out "$GEN" --prefix "$GAME_ID" \
+        --overrides "$GAME_ROOT/build.nosync/game/native_overrides.txt" --jobs "$NCPU")
+}
+
+build() {
+    step "6/7 Checking the translation and building"
+    make -C "$ENGINE/build" GAME="$GAME_TOML" recomp-check \
+        || fail "the translation has gaps (listed above); the build would not run correctly"
+    NCPU=$(sysctl -n hw.ncpu)
+    make -C "$ENGINE/build" GAME="$GAME_TOML" -j"$NCPU"
+    make -C "$ENGINE/build" GAME="$GAME_TOML" app
+}
+
+install_app() {
+    step "7/7 Installing"
+    APP="$GAME_ROOT/build.nosync/$APP_NAME.app"
+    [ -d "$APP" ] || fail "build did not produce $APP"
+    if [ "$INSTALL" -eq 1 ]; then
+        DEST="$HOME/Applications/$APP_NAME.app"
+        mkdir -p "$HOME/Applications"
+        rm -rf "$DEST"
+        # -X: leave out extended attributes. A build folder under ~/Documents
+        # carries file-sync attributes that fail codesign --strict.
+        cp -RX "$APP" "$DEST"
+        APP="$DEST"
+        echo "installed $APP"
+        # The app may have had another name before. Saves and logs are outside it.
+        OLD="$HOME/Applications/$OLD_APP_NAME"
+        if [ -n "$OLD_APP_NAME" ] && [ -d "$OLD" ]; then
+            rm -rf "$OLD"
+            echo "removed the old $OLD"
+        fi
+    else
+        echo "built $APP (not installed)"
+    fi
+    echo
+    echo "Start it by double-clicking $APP, or run: open \"$APP\""
+    echo "Logs: $HOME/Library/Logs/$SUPPORT_DIR/"
+}
+
+preflight
+eval "$("$PYTHON" "$ENGINE/tools/game/profile.py" --shell "$GAME_TOML")"
+DEFAULT_APP="$HOME/Library/Application Support/Steam/steamapps/common/$STEAM_APP"
+eval "GAME_APP=\"\${${ENV_PREFIX}_APP:-\$DEFAULT_APP}\""
+GAME_BIN="$GAME_APP/Contents/MacOS/$GAME_EXE"
+ORIG="$BINARY"
+GEN="$GAME_ROOT/generated.nosync"
+if [ "$CHECK_ONLY" -eq 1 ]; then
+    echo "All requirements are met."
+    exit 0
+fi
+locate_and_copy_game
+setup_venv
+translate
+build
+install_app
