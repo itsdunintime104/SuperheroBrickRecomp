@@ -73,8 +73,14 @@ If the game is in another Steam library, run `MARVEL_APP="/path/to/LEGO Marvel S
 | Option | Effect |
 |---|---|
 | `--check` | Only check the requirements |
-| `--force` | Translate again. Use it after `git pull` |
+| `--force` | Translate again. Use it after an update |
 | `--no-install` | Build the app in `build.nosync/` without copying it to `~/Applications` |
+
+To update to the latest version:
+
+```sh
+git pull && git submodule update --init && ./setup.sh --force
+```
 
 ## Playing
 
@@ -106,12 +112,12 @@ The intro, menus and the first level (Sand Central Station) work, with sound. Te
 
 ## Performance
 
-Tested on an M1 Max MacBook Pro. The game draws with OpenGL 2.1 on Apple's Metal-based driver. Numbers are from the overlay, which measures the last 240 frames.
+Tested on a MacBook Pro 16-inch (2021) with an M1 Max (10-core CPU, 32-core GPU, 32 GB) and macOS 26.6.2. The game draws with OpenGL 2.1 on Apple's Metal-based driver. Numbers are from the overlay, which measures the last 240 frames.
 
 | Scene | Resolution | Frame rate | Frame time |
 |---|---|---|---|
 | Sand Central Station, played by hand | 2592 × 1674 | 72.5 FPS, 1% low 39.7 FPS | 13.8 ms average, 99% under 25.2 ms |
-| Sand Central Station, while screen recording | 2592 × 1674 | 69-85 FPS | 11.7-14.5 ms average |
+| Sand Central Station, while screen recording | 2592 × 1674 | 69–85 FPS | 11.7–14.5 ms average |
 
 <img src="docs/media/screenshot.jpg" alt="Sand Central Station at 2592 × 1674 with the overlay" width="640">
 
@@ -141,11 +147,11 @@ To turn a CSV into a chart:
 
 ## Building and development
 
-The [MacRecomp README](https://github.com/itsdunintime104/MacRecomp#readme) covers how the translation works, the build steps, the checks, debug options and tests. Run its commands from this repo with `GAME=$PWD/game.toml`.
+The [MacRecomp README](https://github.com/itsdunintime104/MacRecomp#readme) covers how the translation works, the build steps, the checks, debug options and tests. Run its `make` commands from the root of this repo.
 
 ## Credits
 
-- **[xboxrecomp](https://github.com/sp00nznet/xboxrecomp)** by sp00nznet: the x86-to-C translator this project's translator is forked from (MIT license).
+- **[xboxrecomp](https://github.com/sp00nznet/xboxrecomp)** by sp00nznet: the x86-to-C translator MacRecomp's translator is forked from (MIT license).
 - **[SDL2](https://www.libsdl.org/)**: window, input and controllers (zlib license).
 - **dlmalloc** by Doug Lea: the guest heap allocator (MIT-0).
 
