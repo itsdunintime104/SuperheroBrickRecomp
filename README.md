@@ -66,9 +66,9 @@ This project is not affiliated with or endorsed by TT Games, Warner Bros. Games,
    ```
 5. Open **Superheros Bricks Recompiled** from `~/Applications`.
 
-`setup.sh` checks your Mac, copies the game binary from your Steam folder, translates it, builds the app and installs it. It never changes the Steam folder. If something is missing, it tells you what and how to fix it. `./setup.sh --check` runs only that check.
+`setup.sh` checks your Mac, copies the game binary from your Steam folder, translates it, builds the app with a copy of the game inside it, and installs it. It never changes the Steam folder. If something is missing, it tells you what and how to fix it. `./setup.sh --check` runs only that check.
 
-If the game is in another Steam library, run `MARVEL_APP="/path/to/LEGO Marvel Super Heroes.app" ./setup.sh`. The app remembers that path.
+If the game is in another Steam library, run `MARVEL_APP="/path/to/LEGO Marvel Super Heroes.app" ./setup.sh`.
 
 | Option | Effect |
 |---|---|
@@ -76,10 +76,35 @@ If the game is in another Steam library, run `MARVEL_APP="/path/to/LEGO Marvel S
 | `--force` | Translate again. Use it after an update |
 | `--no-install` | Build the app in `build.nosync/` without copying it to `~/Applications` |
 
+### What the app holds
+
+```
+~/Applications/Superheros Bricks Recompiled.app
+  Contents/MacOS/                                   the translated game, its launcher and cghelper
+  Contents/Frameworks/                              SDL
+  Contents/Resources/LEGO Marvel Super Heroes.app   your Steam copy of the game
+
+~/Library/Application Support/MarvelRecomp/remote/                         saves
+~/Library/Application Support/Feral Interactive/LEGO Marvel Super Heroes/  settings and shader cache
+~/Library/Logs/MarvelRecomp/                                               logs
+```
+
+The game inside the app is an APFS clone of your Steam copy. On the same disk, a clone shares its disk space with the original, so it takes no extra space. On another disk, setup makes a full copy and says so.
+
+After setup the app needs neither this repo nor the Steam folder. You can uninstall the game from Steam. That frees almost no disk space, because the clone holds the same data. Saves, settings and caches stay outside the app, so building it again does not touch them.
+
+### Build the app again
+
 To update to the latest version:
 
 ```sh
 git pull && git submodule update --init && ./setup.sh --force
+```
+
+If you uninstalled the game from Steam, give setup the copy inside the app:
+
+```sh
+MARVEL_APP="$HOME/Applications/Superheros Bricks Recompiled.app/Contents/Resources/LEGO Marvel Super Heroes.app" ./setup.sh --force
 ```
 
 ## Playing
@@ -140,7 +165,8 @@ To turn a CSV into a chart:
 | Problem | Fix |
 |---|---|
 | Black window that never starts | Click the game window. macOS gave keyboard focus to another app |
-| "game binary not found" | Install the game from Steam, or set `MARVEL_APP` as shown in [Install](#install) |
+| `setup.sh` says "game binary not found" | Install the game from Steam, or set `MARVEL_APP` as shown in [Build the app again](#build-the-app-again) |
+| The app says "LEGO Marvel Super Heroes was not found" | The app has no game inside. Run `./setup.sh` again |
 | `setup.sh` says the sha256 does not match | Only build 329428 works. Let Steam finish updating, and leave any beta branch |
 | Black screen after the intro, or shaders fail | Install Rosetta 2: `softwareupdate --install-rosetta --agree-to-license` |
 | macOS says the app is damaged | Build the app with `setup.sh` on your own Mac. A copy from another Mac does not run |
